@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Hotspot Map PWA</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="manifest" href="manifest.json" />
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+  <style>
+    html,body,#map { height:100%; margin:0; padding:0; }
+    .controls {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      z-index: 1000;
+      background: rgba(255,255,255,0.95);
+      padding: 8px;
+      border-radius: 6px;
+      box-shadow: 0 2px 6px rgba(0,0,0,.2);
+      font-family: Arial, sans-serif;
+      font-size: 14px;
+    }
+    .controls label { display:block; margin-bottom:6px; }
+    #notifyStatus { margin-top:6px; font-size:12px; color:#333; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <div class="controls" id="controls">
+    <strong>Layers</strong>
+    <label><input type="checkbox" id="toggle-heat" /> Heatmap</label>
+    <label><input type="checkbox" id="toggle-cluster" /> Clusters</label>
+    <label><input type="checkbox" id="toggle-pred" /> Predictions</label>
+    <hr/>
+    <button id="btn-startwatch">Start GPS Watch</button>
+    <button id="btn-stopwatch" disabled>Stop GPS Watch</button>
+    <div id="notifyStatus">Notifications: <span id="notifState">?</span></div>
+  </div>
+
+  <!-- Leaflet & Plugins -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+  <script src="https://unpkg.com/leaflet.heat/dist/leaflet-heat.js"></script>
+
+  <script>
+  // ---- Sample data: hotspots and predictions ----
+  // Hotspots array: each hotspot has lat, lng, radiusMeters
+  const HOTSPOTS = [
+    { id: 1, lat: 28.6139, lng: 77.2090, radius: 200, name: "Hotspot A (Delhi)" },
+    { id: 2, lat: 28.7041, lng: 77.1025, radius: 300, name: "Hotspot B" },
+    { id: 3, lat: 28.6200, lng: 77.1200, radius: 150, name: "Hotspot C" }
+  ];
+
+  // Predictions example (GeoJSON features or simple points)
+  const PREDICTIONS = [
+    { id: 'p1', lat: 28.625, lng: 77.11, prediction: 'Likely hotspot soon' },
+    { id: 'p2', lat: 28.61, lng: 77.19, prediction: 'Watch area' }
+  ];
+
+  // ---- Initialize map ----
+  const map = L.map('map').setView([28.6139, 77.2090], 12);
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors'
+  }).addTo(map);
+
+  // ---- Layers ----
+  // Heatmap layer (requires heat plugin)
+  const heatPoints = HOTSPOTS.map(h => [h.lat, h.lng, 0.8]); // last value is intensity
+  const heatLayer = L.heatLayer(heatPoints, { radius: 25, blur: 15 });
+
+  // Cluster layer
+  const markers = L.markerClusterGroup();
+  HOTSPOTS.forEach(h => {
+    const m = L.marker([h.lat, h.lng]).bindPopup(`<b>${h.name}</b><br/>radius ${h.radius} m`);
+    markers.addLayer(m);
+  });
+
+  // Predictions layer (geojson-like)
+  const predLayer = L.layerGroup();
+  PREDICTIONS.forEach(p => {
+    L.circleMarker([p.lat, p.lng], { radius: 8 }).bindPopup(`<b>${p.prediction}</b>`).addTo(predLayer);
+  });
+
+  // Visualization of hotspot radius circles (always present)
+  const hotspotCircles = L.layerGroup();
+  HOTSPOTS.forEach(h => {
+    L.circle([h.lat, h.lng], { radius: h.radius, color: '#ff3b30', opacity: 0.4, fillOpacity: 0.05 })
+      .bindPopup(`<b>${h.name}</b>`)
+      .addTo(hotspotCircles);
+  });
+  hotspotCircles.addTo(map);
+
+  // ---- Layer toggles using checkboxes ----
+  document.getElementById('toggle-heat').addEventListener('change', (e) => {
+    if (e.target.checked) heatLayer.addTo(map); else map.removeLayer(heatLayer);
+  });
+  document.getElementById('toggle-cluster').addEventListener('change', (e) => {
+    if (e.target.checked) markers.addTo(map); else map.removeLayer(markers);
+  });
+  document.getElementById('toggle-pred').addEventListener('change', (e) => {
+    if (e.target.checked) predLayer.addTo(map); else map.removeLayer(predLayer);
+  });
+
+  // ---- Notifications & Geolocation ----
+  let watchId = null;
+  const notifStateEl = document.getElementById('notifState');
+  function updateNotifState() {
+    notifStateEl.textContent = Notification.permission;
+  }
+  updateNotifState();
+
+  // Request notification permission
+  async function askNotificationPermission() {
+    if (!('Notification' in window)) {
+      alert('This browser does not support notifications.');
+      return;
+    }
+    const perm = await Notification.requestPermission();
+    updateNotifState();
+    return perm;
+  }
+
+  // Haversine (distance in meters)
+  function haversineDistance(lat1, lon1, lat2, lon2) {
+    const R = 6371000; // meters
+    const toRad = (v) => v * Math.PI / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon/2)**2;
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R * c;
+  }
+
+  // Notify user (in-app + browser notification)
+  function notifyUser(title, body) {
+    // in-page alert
+    console.log('Notify:', title, body);
+    // browser notification if permitted
+    if (Notification.permission === 'granted') {
+      new Notification(title, { body });
+    } else {
+      // fallback: small UI alert
+      alert(`${title}\n${body}`);
+    }
+  }
+
+  // Check position against hotspots
+  function checkHotspots(pos) {
+    const lat = pos.coords.latitude;
+    const lng = pos.coords.longitude;
+    HOTSPOTS.forEach(h => {
+      const dist = haversineDistance(lat, lng, h.lat, h.lng);
+      if (dist <= h.radius) {
+        notifyUser('Nearby Hotspot', `You are within ${Math.round(dist)}m of ${h.name}`);
+      } else if (dist <= h.radius + 100) {
+        // optional: near
+        console.log(`Near ${h.name}: ${Math.round(dist)}m`);
+      }
+    });
+  }
+
+  // Start watching position
+  document.getElementById('btn-startwatch').addEventListener('click', async () => {
+    if (!('geolocation' in navigator)) { alert('Geolocation not supported'); return; }
+    await askNotificationPermission();
+    if (Notification.permission === 'default') {
+      // user didn't decide; keep going but will show alerts
+    }
+    document.getElementById('btn-startwatch').disabled = true;
+    document.getElementById('btn-stopwatch').disabled = false;
+
+    watchId = navigator.geolocation.watchPosition(position => {
+      checkHotspots(position);
+      // optional: show user marker & pan map
+      const lat = position.coords.latitude;
+      const lng = position.coords.longitude;
+      if (!window._userMarker) {
+        window._userMarker = L.circleMarker([lat, lng], { radius: 6, color: '#007bff' }).addTo(map);
+      } else {
+        window._userMarker.setLatLng([lat, lng]);
+      }
+    }, err => {
+      console.warn('Geolocation error', err);
+      alert('Error getting location: ' + err.message);
+    }, {
+      enableHighAccuracy: true,
+      maximumAge: 5000,
+      timeout: 10000
+    });
+  });
+
+  // Stop watching
+  document.getElementById('btn-stopwatch').addEventListener('click', () => {
+    if (watchId !== null) {
+      navigator.geolocation.clearWatch(watchId);
+      watchId = null;
+      document.getElementById('btn-startwatch').disabled = false;
+      document.getElementById('btn-stopwatch').disabled = true;
+    }
+  });
+
+  // ---- Register service worker for PWA ----
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('service-worker.js').then(reg => {
+        console.log('SW registered', reg);
+      }).catch(err => {
+        console.warn('SW registration failed:', err);
+      });
+    });
+  }
+
+  // Prompt to install PWA (optional handler)
+  window.addEventListener('beforeinstallprompt', (e) => {
+    // Prevent immediate prompt and store event for custom UI if desired
+    e.preventDefault();
+    window.deferredPrompt = e;
+    // You can show an "Install" button in your UI and call deferredPrompt.prompt() when clicked.
+    console.log('beforeinstallprompt saved for later use.');
+  });
+
+  // Center map to user if permission already granted
+  if (navigator.permissions) {
+    // try to detect if geolocation is allowed and then show user
+    navigator.permissions.query({ name: 'geolocation' }).then(p => {
+      if (p.state === 'granted') {
+        navigator.geolocation.getCurrentPosition(pos => {
+          map.setView([pos.coords.latitude, pos.coords.longitude], 13);
+        });
+      }
+    }).catch(()=>{});
+  }
+  </script>
+</body>
+</html>
