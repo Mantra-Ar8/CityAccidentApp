@@ -1,0 +1,1 @@
+Implemented PWA features (manifest.json & service worker) for offline support, added GPS-based hotspot alerts, and integrated map layer toggles for heatmap, clusters, and predictions.
