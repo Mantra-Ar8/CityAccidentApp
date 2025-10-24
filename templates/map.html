@@ -1,0 +1,40 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<div class="container mt-4">
+  <h1>Accident Hotspot Map</h1>
+
+  <!-- City Selection Form -->
+  <form method="get" action="/map" class="my-3">
+    <label for="city" class="form-label">Choose a city:</label>
+    <select id="city" name="city" class="form-select" style="max-width: 250px;">
+      <option value="delhi">Delhi</option>
+      <option value="mumbai">Mumbai</option>
+      <option value="bangalore">Bangalore</option>
+    </select>
+    <button type="submit" class="btn btn-primary mt-2">Load Map</button>
+  </form>
+
+  <!-- Loading Indicator -->
+  <div id="loading" style="display: none;">Loading map...</div>
+
+  <!-- Google Map -->
+  <div class="mt-4">
+    <iframe
+  src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d7000.820507930709!2d77.2090212!3d28.6139391!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x390cfd0c5bfb9d9f%3A0x8f4e57c1eb1da817!2sIndia%20Gate!5e0!3m2!1sen!2sin!4v1692016542297!5m2!1sen!2sin"
+  width="100%"
+  height="400"
+  style="border:0;"
+  allowfullscreen
+  loading="lazy"
+  referrerpolicy="no-referrer-when-downgrade"
+></iframe>
+
+  </div>
+
+  <!-- Hotspot Info -->
+  <div id="hotspot-info" class="mt-3 text-muted">
+    Hotspot data will load here...
+  </div>
+</div>
+{% endblock %}
